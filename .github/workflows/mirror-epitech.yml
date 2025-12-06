@@ -28,5 +28,4 @@ jobs:
           git remote remove epitech 2>/dev/null || true
           git remote add epitech git@github.com:EpitechPGE3-2025/G-CNA-500-PAR-5-1-neuralnetwork-7.git
 
-          BRANCH="${GITHUB_REF#refs/heads/}"
-          git push epitech "$BRANCH:$BRANCH"
+          git push epitech HEAD:${GITHUB_REF#refs/heads/}
