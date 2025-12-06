@@ -1,0 +1,25 @@
+name: Sync to Epitech repo
+
+on:
+  push:
+    branches:
+      - "**"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to Epitech
+        run: |
+          git config user.name "GitHub Action Sync"
+          git config user.email "sync@githubaction.local"
+
+          git remote add epitech https://${{ secrets.EPITECH_TOKEN }}@github.com/EpitechPGE3-2025/G-CNA-500-PAR-5-1-neuralnetwork-7.git
+
+          git push epitech HEAD:${GITHUB_REF#refs/heads/}
