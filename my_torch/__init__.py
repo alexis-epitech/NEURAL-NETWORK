@@ -3,6 +3,7 @@ from .nn import Module, Linear, ReLU, Sigmoid, Dropout, Sequential
 from .optim import Optimizer, SGD
 from .functional import cross_entropy, mse_loss, softmax
 from . import io
+from . import chess
 from . import training
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "mse_loss",
     "softmax",
     "io",
+    "chess",
     "training",
 ]
