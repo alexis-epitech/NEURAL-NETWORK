@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+import os
+import sys
+
+from my_torch import io, nn
+from chess import chess
+
+HELP_TEXT = """USAGE
+./my_torch_generator config_file_1 nb_1 [config_file_2 nb_2...]
+
+DESCRIPTION
+config_file_i
+    Configuration file containing description of a neural network we want
+    to generate.
+nb_i
+    Number of neural networks to generate based on the configuration file.
+"""
+
+
+def parse_args(argv):
+    if not argv:
+        fail("Expected at least one configuration file and number to generate")
+    if argv[0] in ("-h", "--help"):
+        print(HELP_TEXT)
+        sys.exit(0)
+    if len(argv) % 2 != 0:
+        fail("Expected pairs of arguments: config_file nb_to_generate")
+    pairs = []
+    for i in range(0, len(argv), 2):
+        config_file = argv[i]
+        try:
+            count = int(argv[i + 1])
+        except ValueError:
+            fail(f"Invalid number of networks to generate: '{argv[i + 1]}'")
+        if count <= 0:
+            fail("Number of networks to generate must be positive")
+        pairs.append((config_file, count))
+    return pairs
+
+
+def parse_config(path):
+    """Read a minimal config file describing the network layout."""
+    defaults = {
+        "input_dim": chess.FEATURE_DIM,
+        "num_classes": len(chess.LABELS),
+        "hidden": [128, 64],
+        "dropout_p": 0.05,
+    }
+    config = defaults.copy()
+    if not os.path.exists(path):
+        fail(f"Configuration file '{path}' not found")
+    with open(path, "r", encoding="utf-8") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                fail(f"Invalid config line in {path}: '{line}' (expected key=value)")
+            key, value = [part.strip() for part in line.split("=", 1)]
+            if key == "input_dim":
+                config["input_dim"] = int(value)
+            elif key == "num_classes":
+                config["num_classes"] = int(value)
+            elif key == "hidden":
+                config["hidden"] = [int(v) for v in value.replace(",", " ").split() if v]
+            elif key in ("dropout", "dropout_p"):
+                config["dropout_p"] = float(value)
+            else:
+                fail(f"Unknown config key '{key}' in {path}")
+    return config
+
+
+def build_model(conf):
+    dims = [conf["input_dim"]] + conf["hidden"] + [conf["num_classes"]]
+    layers = []
+    for i in range(len(dims) - 1):
+        layers.append(nn.Linear(dims[i], dims[i + 1]))
+        if i < len(dims) - 2:
+            layers.append(nn.ReLU())
+            if conf.get("dropout_p", 0.0) > 0.0:
+                layers.append(nn.Dropout(conf["dropout_p"]))
+    return nn.Sequential(*layers)
+
+
+def generate_from_config(path, count):
+    conf = parse_config(path)
+    base = os.path.splitext(os.path.basename(path))[0]
+    created = []
+    for i in range(1, count + 1):
+        filename = f"{base}_{i}.nn"
+        model = build_model(conf)
+        metadata = {"labels": chess.LABELS, "feature_dim": conf["input_dim"], "config": conf}
+        io.save_model(model, filename, metadata=metadata)
+        created.append(filename)
+    return created
+
+
+def main():
+    pairs = parse_args(sys.argv[1:])
+    for config_file, count in pairs:
+        created = generate_from_config(config_file, count)
+        for name in created:
+            print(name)
+    return 0
+
+
+def fail(message):
+    print(message, file=sys.stderr)
+    sys.exit(84)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except SystemExit:
+        raise
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(84)
