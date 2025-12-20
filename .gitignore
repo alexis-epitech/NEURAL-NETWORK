@@ -1,0 +1,6 @@
+__pycache__/
+training_data/
+config/
+dataset/
+chessboards_example.txt
+*.pdf
