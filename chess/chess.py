@@ -1,8 +1,8 @@
 import numpy as np
 
-from .tensor import Tensor
+from my_torch.tensor import Tensor
 
-PIECE_TO_INDEX = {
+PIECE_TO_INT = {
     "P": 0,
     "N": 1,
     "B": 2,
@@ -19,10 +19,10 @@ PIECE_TO_INDEX = {
 
 LABELS = ["Nothing", "Check White", "Check Black", "Checkmate White", "Checkmate Black"]
 LABEL_TO_INDEX = {label: i for i, label in enumerate(LABELS)}
-FEATURE_DIM = 64 * len(PIECE_TO_INDEX) + 1 + 4 + 1
-
+FEATURE_DIM = 64 * len(PIECE_TO_INT) + 1 + 4 + 1
 
 def fen_to_vector(fen):
+    """Convert a FEN string into a flat numeric vector."""
     parts = fen.strip().split()
     if len(parts) < 4:
         raise ValueError(f"Invalid FEN string: {fen}")
@@ -31,16 +31,17 @@ def fen_to_vector(fen):
     for rank in board.split("/"):
         for char in rank:
             if char.isdigit():
-                encoded_board.extend([0] * int(char) * len(PIECE_TO_INDEX))
+                encoded_board.extend([0] * int(char) * len(PIECE_TO_INT))
             else:
-                one_hot = [0] * len(PIECE_TO_INDEX)
-                idx = PIECE_TO_INDEX.get(char)
+                one_hot = [0] * len(PIECE_TO_INT)
+                idx = PIECE_TO_INT.get(char)
                 if idx is None:
                     raise ValueError(f"Unexpected piece '{char}' in FEN '{fen}'")
                 one_hot[idx] = 1
                 encoded_board.extend(one_hot)
-    if len(encoded_board) < 64 * len(PIECE_TO_INDEX):
-        encoded_board.extend([0] * (64 * len(PIECE_TO_INDEX) - len(encoded_board)))
+
+    if len(encoded_board) < 64 * len(PIECE_TO_INT):
+        encoded_board.extend([0] * (64 * len(PIECE_TO_INT) - len(encoded_board)))
     active_flag = 1.0 if active == "w" else 0.0
     castling_flags = [
         1.0 if "K" in castling else 0.0,
@@ -54,6 +55,7 @@ def fen_to_vector(fen):
 
 
 def parse_chess_file(path, label_to_index=None, require_label=True):
+    """Load dataset file with FEN and optional label."""
     label_map = label_to_index or LABEL_TO_INDEX
     features = []
     labels = []
