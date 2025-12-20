@@ -39,7 +39,6 @@ def parse_args(argv):
 
 
 def parse_config(path):
-    """Read a minimal config file describing the network layout."""
     defaults = {
         "input_dim": chess.FEATURE_DIM,
         "num_classes": len(chess.LABELS),

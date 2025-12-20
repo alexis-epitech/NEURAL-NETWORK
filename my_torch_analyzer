@@ -1,0 +1,200 @@
+#!/usr/bin/env python3
+import signal
+import sys
+
+from my_torch import io, nn, training
+from chess import chess
+
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+
+HELP_TEXT = """USAGE
+./my_torch_analyzer [--predict | --train [--save SAVEFILE]] LOADFILE CHESSFILE
+
+DESCRIPTION
+--train
+    Launch the neural network in training mode. Each chessboard in FILE must
+    contain inputs to send to the neural network in FEN notation and the expected output
+    separated by space. If specified, the newly trained neural network will be saved in
+    SAVEFILE. Otherwise, it will be saved in the original LOADFILE.
+--predict
+    Launch the neural network in prediction mode. Each chessboard in FILE must
+    contain inputs to send to the neural network in FEN notation, and optionally an expected
+    output.
+--save
+    Save neural network into SAVEFILE. Only works in train mode.
+LOADFILE
+    File containing an artificial neural network
+CHESSFILE
+    File containing chessboards
+"""
+
+DEFAULT_EPOCHS = 15
+DEFAULT_LR = 5e-3
+DEFAULT_BATCH_SIZE = 256
+DEFAULT_WEIGHT_DECAY = 1e-5
+DEFAULT_DROPOUT_P = 0.05
+DEFAULT_MOMENTUM = 0.9
+DEFAULT_LR_DECAY = 0.99
+
+
+def build_default_model(input_dim=chess.FEATURE_DIM, num_classes=len(chess.LABELS)):
+    hidden = [128, 64]
+    layers = []
+    prev = input_dim
+    for h in hidden:
+        layers.append(nn.Linear(prev, h))
+        layers.append(nn.ReLU())
+        if DEFAULT_DROPOUT_P > 0.0:
+            layers.append(nn.Dropout(DEFAULT_DROPOUT_P))
+        prev = h
+    layers.append(nn.Linear(prev, num_classes))
+    return nn.Sequential(*layers)
+
+
+def parse_args(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(HELP_TEXT)
+        sys.exit(0)
+
+    predict = False
+    train_mode = False
+    save_path = None
+    remaining = []
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        if token == "--predict":
+            if train_mode:
+                fail("Cannot use --predict and --train together")
+            predict = True
+            i += 1
+            continue
+        if token == "--train":
+            if predict:
+                fail("Cannot use --predict and --train together")
+            train_mode = True
+            i += 1
+            continue
+        if token == "--save":
+            if i + 1 >= len(argv):
+                fail("Missing SAVEFILE after --save")
+            save_path = argv[i + 1]
+            i += 2
+            continue
+        if token.startswith("-"):
+            fail(f"Unknown option '{token}'")
+        remaining = argv[i:]
+        break
+
+    if not train_mode and not predict:
+        predict = True
+
+    if len(remaining) != 2:
+        fail("Expected LOADFILE and CHESSFILE")
+
+    loadfile, chessfile = remaining
+    if save_path and not train_mode:
+        fail("--save is only valid with --train")
+
+    mode = "train" if train_mode else "predict"
+    return {
+        "mode": mode,
+        "loadfile": loadfile,
+        "chessfile": chessfile,
+        "save": save_path,
+    }
+
+
+def main():
+    args = parse_args(sys.argv[1:])
+    mode = args["mode"]
+
+    try:
+        model, metadata = io.load_model(args["loadfile"])
+        labels = metadata.get("labels", chess.LABELS)
+        feature_dim = metadata.get("feature_dim", chess.FEATURE_DIM)
+    except FileNotFoundError:
+        if mode != "train":
+            return fail(f"Unable to load neural network '{args['loadfile']}'")
+        model = build_default_model()
+        labels = chess.LABELS
+        feature_dim = chess.FEATURE_DIM
+        metadata = {"labels": labels, "feature_dim": feature_dim}
+    except Exception as exc:
+        return fail(f"Failed to load neural network: {exc}")
+
+    label_map = {name: i for i, name in enumerate(labels)}
+
+    def first_linear(model_obj):
+        if hasattr(model_obj, "layers"):
+            for layer in model_obj.layers:
+                if isinstance(layer, nn.Linear):
+                    return layer
+        return None
+
+    if mode == "train":
+        try:
+            features, targets = chess.parse_chess_file(args["chessfile"], label_to_index=label_map, require_label=True)
+        except Exception as exc:
+            return fail(str(exc))
+        if features.shape[1] != feature_dim:
+            return fail(f"Input dimension mismatch: expected feature_dim={feature_dim}, got {features.shape[1]}")
+        first = first_linear(model)
+        if first and first.in_features != features.shape[1]:
+            return fail(f"Network expects {first.in_features} features, but dataset has {features.shape[1]}")
+        dataset = chess.ChessDataset(features, targets)
+        training.train(
+            model,
+            dataset,
+            epochs=DEFAULT_EPOCHS,
+            batch_size=DEFAULT_BATCH_SIZE,
+            lr=DEFAULT_LR,
+            weight_decay=DEFAULT_WEIGHT_DECAY,
+            momentum=DEFAULT_MOMENTUM,
+            lr_decay=DEFAULT_LR_DECAY,
+            verbose=True,
+        )
+        accuracy = training.evaluate_accuracy(model, dataset, batch_size=DEFAULT_BATCH_SIZE)
+        print(f"Accuracy: {accuracy:.4f}")
+        save_path = args["save"] or args["loadfile"]
+        metadata.update({"labels": labels, "feature_dim": feature_dim})
+        io.save_model(model, save_path, metadata=metadata)
+    else:
+        try:
+            features, targets = chess.parse_chess_file(
+                args["chessfile"], label_to_index=label_map, require_label=False
+            )
+        except Exception as exc:
+            return fail(str(exc))
+        if features.shape[1] != feature_dim:
+            return fail(f"Input dimension mismatch: expected feature_dim={feature_dim}, got {features.shape[1]}")
+        first = first_linear(model)
+        if first and features.shape[1] != first.in_features:
+            return fail(
+                f"Input dimension mismatch: network expects {first.in_features}, "
+                f"file provides {features.shape[1]}"
+            )
+        predictions, _ = training.predict(model, features, batch_size=DEFAULT_BATCH_SIZE)
+        for pred in predictions:
+            label_name = labels[int(pred)]
+            print(label_name)
+        if targets is not None:
+            accuracy = (predictions == targets).mean()
+            print(f"# accuracy: {accuracy:.4f}", file=sys.stderr)
+
+    return 0
+
+
+def fail(message):
+    print(message, file=sys.stderr)
+    sys.exit(84)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except SystemExit:
+        raise
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(84)
