@@ -14,8 +14,7 @@ Documentation:
 - [Benchmarks](docs/BENCHMARKS.md)
 
 Contributors :
+- Alexis Constantinopoulos
+- Raphael Guérin
 
-Alexis Constantinopoulos
-Raphael Guérin
-
-License : MIT
+License : **MIT**
